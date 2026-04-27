@@ -20,8 +20,8 @@ async function requirePatientAccess(req, res, next) {
   }
 
   const patientId =
+    req.patientContextId ||
     req.headers["x-patient-id"] ||
-    req.params.id ||
     req.query.patientId ||
     req.body.patientId ||
     req.user.id;
@@ -55,4 +55,11 @@ async function requirePatientAccess(req, res, next) {
   return res.status(403).json({ error: "You do not have access to this patient" });
 }
 
-module.exports = { requireRole, requirePatientAccess };
+function requirePatientParamAccess(paramName = "id") {
+  return function patientParamGuard(req, _res, next) {
+    req.patientContextId = req.params[paramName];
+    return requirePatientAccess(req, _res, next);
+  };
+}
+
+module.exports = { requireRole, requirePatientAccess, requirePatientParamAccess };

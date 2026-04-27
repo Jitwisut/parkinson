@@ -1,5 +1,6 @@
-const { getFirebaseAdmin, isFirebaseConfigured } = require("../lib/firebase");
 const { prisma } = require("../lib/prisma");
+const jwt = require("jsonwebtoken");
+const { JWT_SECRET } = require("../services/authService");
 
 function canUseDevAuth() {
   return process.env.ALLOW_DEV_AUTH === "true";
@@ -50,23 +51,21 @@ async function resolveAuth(req) {
     return devUser ? { user: devUser, auth: null, mode: "dev" } : null;
   }
 
-  const firebase = getFirebaseAdmin();
-
-  if (!firebase) {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+    });
+    
+    if (!user) return null;
+    
+    // Omit password from returned user object in req.user
+    const { password, ...userWithoutPassword } = user;
+    
+    return { user: userWithoutPassword, auth: decoded, mode: "jwt" };
+  } catch (error) {
     return null;
   }
-
-  const decoded = await firebase.auth().verifyIdToken(token);
-  const user = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { firebaseUid: decoded.uid },
-        ...(decoded.email ? [{ email: decoded.email }] : []),
-      ],
-    },
-  });
-
-  return { user, auth: decoded, mode: "firebase" };
 }
 
 async function optionalAuth(req, _res, next) {
@@ -86,17 +85,9 @@ async function requireAuth(req, res, next) {
   try {
     const resolved = await resolveAuth(req);
 
-    if (!resolved) {
+    if (!resolved || !resolved.user) {
       return res.status(401).json({
-        error: isFirebaseConfigured()
-          ? "Missing or invalid authentication"
-          : "Authentication unavailable. Configure Firebase or enable dev auth.",
-      });
-    }
-
-    if (!resolved.user) {
-      return res.status(403).json({
-        error: "Authenticated user does not have an application profile yet",
+        error: "Missing, invalid, or expired authentication token",
       });
     }
 

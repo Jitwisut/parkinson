@@ -25,9 +25,16 @@ router.use(requirePatientAccess);
 router.post(
   "/",
   asyncHandler(async (req, res) => {
+    console.log("=== INCOMING POST /symptoms REQUEST ===");
+    console.log("Headers:", req.headers);
+    console.log("Body:", req.body);
     const patientId = requirePatientId(req);
+    console.log("Resolved Patient ID:", patientId);
+    
     const payload = symptomSchema.parse(req.body);
     const item = await createSymptom(patientId, payload);
+    
+    console.log("=== SUCCESSFULLY CREATED SYMPTOM ===");
     res.status(201).json(item);
   })
 );

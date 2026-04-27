@@ -1,44 +1,68 @@
 const { prisma } = require("../lib/prisma");
-const { getFirebaseAdmin } = require("../lib/firebase");
 const { HttpError } = require("../utils/httpError");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
-async function verifyTokenAndResolveProfile(idToken) {
-  const firebase = getFirebaseAdmin();
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development";
 
-  if (!firebase) {
-    throw new HttpError(503, "Firebase admin is not configured");
-  }
+function generateToken(user) {
+  return jwt.sign(
+    { userId: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+}
 
-  const decoded = await firebase.auth().verifyIdToken(idToken);
-  const user = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { firebaseUid: decoded.uid },
-        ...(decoded.email ? [{ email: decoded.email }] : []),
-      ],
-    },
+async function loginUser(email, password) {
+  const user = await prisma.user.findUnique({
+    where: { email },
   });
 
-  return { decoded, user };
+  if (!user || !user.password) {
+    throw new HttpError(401, "Invalid email or password");
+  }
+
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+
+  if (!isPasswordValid) {
+    throw new HttpError(401, "Invalid email or password");
+  }
+
+  const token = generateToken(user);
+
+  // Omit password from returned user object
+  const { password: _password, ...userWithoutPassword } = user;
+
+  return { user: userWithoutPassword, token };
 }
 
 async function registerUser(input) {
-  return prisma.user.upsert({
+  const existingUser = await prisma.user.findUnique({
     where: { email: input.email },
-    update: {
-      firebaseUid: input.firebaseUid ?? undefined,
-      name: input.name,
-      role: input.role,
-      fcmToken: input.fcmToken ?? null,
-    },
-    create: {
-      firebaseUid: input.firebaseUid ?? null,
+  });
+
+  if (existingUser) {
+    throw new HttpError(400, "Email is already registered");
+  }
+
+  const hashedPassword = await bcrypt.hash(input.password, 10);
+
+  const user = await prisma.user.create({
+    data: {
       email: input.email,
+      password: hashedPassword,
       name: input.name,
       role: input.role,
       fcmToken: input.fcmToken ?? null,
     },
   });
+
+  const token = generateToken(user);
+
+  // Omit password from returned user object
+  const { password: _password, ...userWithoutPassword } = user;
+
+  return { user: userWithoutPassword, token };
 }
 
-module.exports = { verifyTokenAndResolveProfile, registerUser };
+module.exports = { loginUser, registerUser, JWT_SECRET };

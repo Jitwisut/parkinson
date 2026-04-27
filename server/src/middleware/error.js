@@ -8,9 +8,14 @@ function notFoundHandler(req, res) {
 }
 
 function errorHandler(error, _req, res, _next) {
+  console.error("=== ERROR HANDLER ===", error);
   if (error instanceof ZodError) {
+    const fieldErrors = error.flatten().fieldErrors;
+    const firstField = Object.keys(fieldErrors)[0];
+    const firstMessage = fieldErrors[firstField]?.[0] || "Invalid input";
+    
     return res.status(400).json({
-      error: "Validation Error",
+      error: `Validation error on ${firstField}: ${firstMessage}`,
       details: error.flatten(),
     });
   }
